@@ -1,10 +1,6 @@
 <template>
   <div class="text-editor">
-    <div class="controls-list"
-    @mousedown.stop
-    @mouseup.stop
-    @click.stop
-    @focus.stop>
+    <div class="controls-list">
       <color-input v-slot="{on}"
       @input="onColorInput">
         <c-btn v-on="on">Color</c-btn>
@@ -40,7 +36,86 @@
 import CBtn from './CBtn'
 import ColorInput from './ColorInput'
 import TextInput from './TextInput'
+
 /* eslint-disable */
+function execCommand(container, editFunc){;
+  let selection = document.getSelection();
+  if(selection.toString() && !selection.isCollapsed && selection.containsNode(container, true))
+  for(let i = 0; i < selection.rangeCount; ++i){
+    let range = selection.getRangeAt(i).cloneRange();
+    //clamp range
+    if(container.compareDocumentPosition(range.startContainer) & document.DOCUMENT_POSITION_PRECEDING){
+      range.setStartBefore(container.firstChild)
+    }
+    if((container.compareDocumentPosition(range.endContainer) & document.DOCUMENT_POSITION_FOLLOWING) && !container.contains(range.endContainer)){
+      range.setEndAfter(container.lastChild)
+    }
+    let startNode = range.startContainer;
+    let startOffset = range.startOffset;
+    let endNode = range.endContainer;
+    let endOffset = range.endOffset;
+
+    if(startNode == endNode){
+      splitTextNode(startNode, startOffset, endOffset);
+    }else{
+      let start = splitTextNode(startNode, startOffset);
+      let end = splitTextNode(endNode, 0, endOffset);
+      let node = start.nextSibling;
+      while(node && node != end){
+        node = splitTextNode(node, 0);
+        node = node?.nextSibling;
+      }
+    }
+    function splitTextNode(node, startOffset, endOffset){
+      if(node.nodeType === Node.TEXT_NODE){
+        let prevText, text = node, nextText;
+        if(startOffset > 0){
+          text = node.splitText(startOffset);
+          prevText = node;
+        }
+        if(endOffset){
+          nextText = text.splitText(endOffset - startOffset);
+        }
+        let parent = node.parentElement;
+        parent = (parent == container) ? null : parent;
+        if(parent){
+          let parentParts = [];
+          if(prevText && prevText.textContent){
+            let prev = parent.cloneNode()
+            prev.appendChild(prevText);
+            parentParts.push(prev);
+          }
+          if(text && text.textContent){
+            let curr = parent.cloneNode()
+            text = curr.appendChild(text);
+            editFunc(curr);
+            parentParts.push(curr);
+          }
+          if(nextText && nextText.textContent){
+            let next = parent.cloneNode()
+            next.appendChild(nextText);
+            parentParts.push(next);
+          }
+          if(parentParts.length > 0) parent.replaceWith(...parentParts);
+          return text.parentElement;
+        }else if(text.textContent){
+          let editNode = document.createElement('span');
+          editNode.appendChild(text.cloneNode(true));
+          editFunc(editNode);
+          text.replaceWith(editNode);
+          return editNode;
+        }
+        return text;
+      }else if(node.nodeType === Node.ELEMENT_NODE){
+        let child = node.firstChild;
+        if(child){
+          return splitTextNode(child);
+        }
+      }
+      return node;
+    }
+  }
+}
 export default {
   name: "TextEditor",
   components: {
@@ -52,7 +127,6 @@ export default {
     value: String
   },
   data: () => ({
-    lastRanges: [],
     fontSizeOptions: [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30]
   }),
   methods: {
@@ -63,155 +137,19 @@ export default {
       this.$emit('input', e.target.innerHTML);
     },
     onColorInput(value){
-      this.execCommand(elem => {
+      execCommand(this.$refs.editorInput, elem => {
         elem.style.color = value;
       });
     },
     onBackgroundInput(value){
-      this.execCommand(elem => {
+      execCommand(this.$refs.editorInput, elem => {
         elem.style.backgroundColor = value;
       });
     },
     onFontSizeInput(e){
-      this.execCommand(elem => {
+      execCommand(this.$refs.editorInput, elem => {
         elem.style.fontSize = e.target.value;
       });
-    },
-    execCommand(editFunc){
-      const editorInput = this.$refs.editorInput;
-      let selection = document.getSelection();
-      if(selection.toString() && !selection.isCollapsed){
-        this.lastRanges = [];
-        for(let i = 0; i < selection.rangeCount; ++i){
-          this.lastRanges.push(selection.getRangeAt(i));
-        }
-      }
-      for(let range of this.lastRanges){
-        //clamp range
-        if(editorInput.compareDocumentPosition(range.startContainer) & document.DOCUMENT_POSITION_PRECEDING){
-          range.setStartBefore(editorInput.firstChild)
-          console.log('preceding')
-        }
-        if(editorInput.compareDocumentPosition(range.endContainer) & (document.DOCUMENT_POSITION_FOLLOWING ^ ~document.DOCUMENT_POSITION_CONTAINED_BY)){
-          range.setEndAfter(editorInput.lastChild)
-          console.log('follow')
-        }
-        let startNode = range.startContainer;
-        let startOffset = range.startOffset;
-        let endNode = range.endContainer;
-        let endOffset = range.endOffset;
-
-        let node = startNode;
-        let offset = startOffset;
-        let isEnd = false;
-        while(!isEnd){
-          if(node == endNode){
-            isEnd = true;
-          }
-          console.log('sibling', node);
-          if(node.nodeType === Node.TEXT_NODE){
-            let prevText, text, nextText;
-            if(offset > 0){
-              text = node.splitText(offset);
-              prevText = node;
-            }
-            if(isEnd){
-              if(offset > 0){
-                nextText = text.splitText(endOffset - offset);
-              }else{
-                nextText = node.splitText(endOffset);
-                text = node;
-              }
-            }
-            let parent = node.parentElement;
-            parent = (parent === editorInput) ? null : parent;
-            if(parent){
-              let parentParts = [];
-              if(prevText){
-                let prev = parent.cloneNode()
-                prev.textContent = prevText.textContent;
-                parentParts.push(prev);
-              }
-              if(text){
-                let curr = parent.cloneNode()
-                curr.textContent = text.textContent;
-                editFunc(curr)
-                parentParts.push(curr);
-              }
-              if(nextText){
-                let next = parent.cloneNode()
-                next.textContent = nextText.textContent;
-                parentParts.push(next);
-              }
-              if(parentParts.length > 0) parent.replaceWith(...parentParts);
-            }else{
-              let editNode = document.createElement('span');
-              editNode.textContent = text.textContent;
-              editFunc(editNode);
-              text.replaceWith(editNode);
-            }
-          }else if(node.nodeType === Node.ELEMENT_NODE){
-            editFunc(node);
-          }
-          node = node.nextSibling;
-          offset = 0;
-        }
-
-        // let rangeL = document.createRange();
-        // rangeL.setStartBefore(editorInput.firstChild);
-        // rangeL.setEnd(startNode, startOffset);
-        // let fragmentL = rangeL.cloneContents();
-
-        // let rangeR = document.createRange();
-        // rangeR.setStart(endNode, endOffset);
-        // rangeR.setEndAfter(editorInput.lastChild);
-        // let fragmentR = rangeR.cloneContents();
-        
-        // let editFragment = range.extractContents();
-        // console.log(editFragment)
-        // editFragment.childNodes.forEach(node => {
-        //   if(node.nodeType === Node.TEXT_NODE){
-        //     if(node.textContent){
-        //       let editNode = document.createElement('span');
-        //       editNode.innerText = node.textContent;
-        //       editFragment.replaceChild(editNode, node);
-        //       let parent = editNode.parentElement;
-        //       if(parent) editNode.style = parent.style;
-        //       editFunc(editNode);
-        //     }
-        //   }else if(node.nodeType === Node.ELEMENT_NODE){
-        //     if(node.nodeName.toLowerCase() === 'span'){
-        //       editFunc(node);
-        //     }
-        //   }
-        // })
-
-        // editorInput.innerHTML = '';
-        // console.log(fragmentL, editFragment, fragmentR);
-        // appendFragment(fragmentL, editorInput);
-        // appendFragment(editFragment, editorInput);
-        // appendFragment(fragmentR, editorInput);
-        // editorInput.appendChild(fragmentL);
-        // editorInput.appendChild(editFragment);
-        // editorInput.appendChild(fragmentR);
-        // let editRange = document.createRange();
-        // editRange.setStart(editorInput.firstChild, 0);
-        // editRange.setEndAfter(editorInput.lastChild);
-        // //editRange.selectNodeContents(editorInput);
-        // console.log('edit range  ', editRange.cloneContents())
-        // range = editRange;
-        
-        console.log(editorInput);
-
-        
-        
-        function appendFragment(frag, parent){
-          frag.childNodes.forEach(node => {
-            if(node.textContent)
-              parent.appendChild(node);
-          })
-        }
-      }
     },
     convertToJSON(){
       const editorInput = this.$refs.editorInput;
@@ -242,7 +180,7 @@ export default {
             && last.backgroundColor == styles.backgroundColor 
             && last.fontSize == styles.fontSize
           ){
-            last.text = (last.text || '') + text;
+            last.text = (last.text || '') + ' '+text;
           }else{
             last = {
               text,
@@ -251,7 +189,6 @@ export default {
             res.push(last);
           }
         }
-        
       })
       this.$emit('convert', JSON.stringify(res, (key, val) => !val ? undefined : val, 4));
     }
